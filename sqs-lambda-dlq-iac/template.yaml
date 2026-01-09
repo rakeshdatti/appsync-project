@@ -42,7 +42,7 @@ Resources:
       Timeout: 10
       Code: 
         ZipFile: |
-          exports.handler = async (event) => {
+          export const handler = async (event) => {
               for(const record of event.Records){
               const body=JSON.parse(record.body);
               console.log("Message Received",body);
@@ -57,11 +57,11 @@ Resources:
           }
           };
 
-    ###event source mapping 
-    SQSTrigger:
-      Type: AWS::Lambda::EventSourceMapping
-      Properties:
-        EventSourceArn: !GetAtt DemoMainQueue.Arn
-        FunctionName: !Ref SQSLambdaFunction
-        BatchSize: 1
-        Enabled: True
+  #event source mapping 
+  SQSTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt DemoMainQueue.Arn
+      FunctionName: !Ref SQSLambdaFunction
+      BatchSize: 1
+      Enabled: true
