@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SQS Queue with Lambda Trigger and Dead Letter Queue
+
+Resources:
+  DemoDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: demo-dead-letter-queue
+
+  DemoMainQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: demo-main-queue
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DemoDLQ.Arn
+        maxReceiveCount: 3
+
+  #iam role for lambda to read from sqs
+  LambdaExecutionRole:
+   Type: AWS::IAM::Role
+   Properties:
+    RoleName: demo-lambda-execution-role
+    AssumeRolePolicyDocument:
+      Version: '2012-10-17'
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+    ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+
+  #lambda
+  SQSLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: sqs-dlq-demo 
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn 
+      Timeout: 10
+      Code: 
+        ZipFile: |
+          exports.handler = async (event) => {
+              for(const record of event.Records){
+              const body=JSON.parse(record.body);
+              console.log("Message Received",body);
+
+              if(body.shouldFail==true){
+                  console.error("intentional error");
+                  throw new Error("processing failed");
+              }
+
+              console.log("Processed successfully ",body.orderId);
+
+          }
+          };
+
+    ###event source mapping 
+    SQSTrigger:
+      Type: AWS::Lambda::EventSourceMapping
+      Properties:
+        EventSourceArn: !GetAtt DemoMainQueue.Arn
+        FunctionName: !Ref SQSLambdaFunction
+        BatchSize: 1
+        Enabled: True
