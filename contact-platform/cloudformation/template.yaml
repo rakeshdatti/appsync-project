@@ -1,0 +1,179 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Contact Platform CloudFormation Template
+
+Resources:
+
+  ### Lambda Execution Role ###
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ### Lambda Function ###
+  HelloLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: Day1LambdaFunction
+      Runtime: nodejs18.x
+      Handler: handler.handler
+      Role: !GetAtt LambdaRole.Arn
+      Code:
+        S3Bucket: contact-platform-day1-12345
+        S3Key: hello.zip
+
+  ### AppSync API ###
+  GraphQLApi:
+    Type:  AWS::AppSync::GraphQLApi
+    Properties:
+      Name: ContactPlatformAPI
+      AuthenticationType: API_KEY
+
+  ### AppSync Schema ###
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Definition: |
+        type Query {
+          hello(name: String): HelloResponse
+        }
+
+        type HelloResponse {
+          message: String
+          input: String
+        }
+
+        schema {
+          query: Query
+        }
+
+  ### AppSync IAM Role ###
+  AppSyncLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt HelloLambdaFunction.Arn
+
+  ### Lambda DataSource ###
+  LambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: HelloLambdaSource
+      Type: AWS_LAMBDA
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt HelloLambdaFunction.Arn
+      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
+
+  HelloResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: LambdaDataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: hello
+      DataSourceName: HelloLambdaSource
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {
+            operation: "Invoke",
+            payload: {
+              arguments: ctx.args
+            }
+          };
+        }
+
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+
+  CreateContactResolver:
+    Type: AWS::Appsync::Resolver
+    Properties:
+    ApiId: !GetAtt GraphQLApi.ApiId
+    TypeName: Mutation
+    FieldName: createContact
+    DataSourceName: HelloLambdaSource
+    Runtime: 
+      Name: APPSYNC_JS
+      RuntimeVersion: 1.0.0
+    Code: |
+      export function request(ctx){
+        if(!ctx.args.name || !ctx.args.phone){
+          throw new Error("Name and Phone are required fields.","BAD_REQEST");
+        }
+        return{
+          operation: "Invoke",
+          payload: {
+            arguments: ctx.args,
+            info:{
+              "fieldName": "createContact"
+            }
+            
+          };
+        }
+      }
+      export function response(ctx){
+        return ctx.result;
+      }
+
+  GetContactResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: getContacts
+      DataSourceName: HelloLambdaSource
+      Runtime: 
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx){
+          return{
+            operation: "Invoke",
+            payload: {
+              info: {
+                fieldName: "getContacts"
+              }
+            }
+          }
+        }
+        export function response(ctx){
+          return ctx.result
+        }
+      
+
+
+
+
+  ### API Key ###
+  ApiKey:
+    Type: AWS::AppSync::ApiKey
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
